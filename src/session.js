@@ -52,6 +52,11 @@ async function acquireLock() {
   throw new Error('Timed out waiting for the browser lock');
 }
 
+function heavyRequest(url, type) {
+  if (type === 'media') return true;
+  return /maps\.googleapis|maps\.gstatic|maps\.google|doubleclick|googletagmanager|google-analytics|facebook\.net|hotjar/i.test(url);
+}
+
 export async function withBrowser(source, fn) {
   const sessionDir = path.join(root, 'session', sourceKey(source));
   await fs.mkdir(sessionDir, { recursive: true });
@@ -62,6 +67,12 @@ export async function withBrowser(source, fn) {
       headless: headless(),
       viewport: { width: 1280, height: 900 },
       locale: 'en-GB',
+      args: ['--disable-gpu', '--disable-software-rasterizer', '--disable-extensions', '--mute-audio', '--renderer-process-limit=2'],
+    });
+    await context.route('**/*', (route) => {
+      const request = route.request();
+      if (heavyRequest(request.url(), request.resourceType())) return route.abort();
+      return route.continue();
     });
     context.setDefaultNavigationTimeout(10000);
     const page = context.pages()[0] || (await context.newPage());

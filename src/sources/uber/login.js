@@ -191,15 +191,14 @@ async function saved(report, message) {
 }
 
 async function openLogin(page, email) {
-  await page.goto(HOME, { waitUntil: 'domcontentloaded' });
-  await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+  await page.goto(LOGIN, { waitUntil: 'domcontentloaded' });
   const deadline = Date.now() + 8000;
   while (Date.now() < deadline) {
     if (await loginScreen(page)) break;
-    if (await signedIn(page)) {
-      await sleep(1000);
+    if (rideHome(page) || (await signedIn(page))) {
+      await sleep(500);
       if (await loginScreen(page)) break;
-      if (await signedIn(page)) return 'signed-in';
+      if (rideHome(page) || (await signedIn(page))) return 'signed-in';
     }
     await sleep(300);
   }
