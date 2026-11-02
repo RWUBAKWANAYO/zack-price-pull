@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Price pull sign-in</title>
+  <style>
+    body { margin: 0; font: 16px/1.4 system-ui, sans-serif; background: #111827; color: #f9fafb; }
+    main { max-width: 720px; margin: 0 auto; padding: 32px 20px; }
+    h1 { font-size: 28px; margin: 0 0 8px; }
+    p { color: #d1d5db; }
+    ul { list-style: none; padding: 0; margin: 24px 0 0; }
+    li { display: flex; align-items: center; gap: 16px; padding: 16px; margin-bottom: 12px; background: #1f2937; border-radius: 12px; }
+    strong { font-size: 18px; }
+    .session { color: #9ca3af; margin-left: auto; }
+    button { border: 0; border-radius: 8px; padding: 10px 14px; background: #2563eb; color: white; font: inherit; cursor: pointer; }
+    dialog { border: 0; border-radius: 12px; padding: 20px; width: min(420px, calc(100% - 32px)); background: #1f2937; color: inherit; }
+    dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+    label { display: block; margin: 16px 0 8px; }
+    input { width: 100%; box-sizing: border-box; padding: 10px; border-radius: 8px; border: 1px solid #4b5563; background: #111827; color: inherit; font: inherit; }
+    input.active { border-color: #60a5fa; outline: 2px solid #2563eb; }
+    .row { display: flex; gap: 8px; margin-top: 16px; }
+    .ghost { background: #374151; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Price pull sign-in</h1>
+    <p>When a company session expires, re-authenticate it here. The box shows only the code Uber is asking for on this step. After the ride home profile is open, the browser closes.</p>
+    <ul id="companies"></ul>
+  </main>
+  <dialog id="auth-dialog">
+    <h2 id="auth-title">Re-authenticate</h2>
+    <p id="auth-status">Opening the browser.</p>
+    <form id="auth-form" class="hidden">
+      <div id="auth-email-field" class="hidden">
+        <label for="auth-email-code">Email code</label>
+        <input id="auth-email-code" name="emailCode" inputmode="numeric" autocomplete="one-time-code" maxlength="8">
+      </div>
+      <div id="auth-whatsapp-field" class="hidden">
+        <label for="auth-whatsapp-code">WhatsApp code</label>
+        <input id="auth-whatsapp-code" name="whatsappCode" inputmode="numeric" autocomplete="one-time-code" maxlength="8">
+      </div>
+      <div class="row">
+        <button type="submit">Fill the code</button>
+        <button type="button" class="ghost" id="auth-close">Close</button>
+      </div>
+    </form>
+    <div class="row hidden" id="auth-close-row">
+      <button type="button" class="ghost" id="auth-close-2">Close</button>
+    </div>
+  </dialog>
+  <script>
+    const list = document.querySelector('#companies');
+    const dialog = document.querySelector('#auth-dialog');
+    const title = document.querySelector('#auth-title');
+    const status = document.querySelector('#auth-status');
+    const form = document.querySelector('#auth-form');
+    const closeRow = document.querySelector('#auth-close-row');
+    const emailField = document.querySelector('#auth-email-field');
+    const whatsappField = document.querySelector('#auth-whatsapp-field');
+    const emailCode = document.querySelector('#auth-email-code');
+    const whatsappCode = document.querySelector('#auth-whatsapp-code');
+    let current = '';
+    let asked = '';
+    let timer = 0;
+
+    function sessionLabel(value) {
+      if (value === 'signed-in') return 'Signed in';
+      if (value === 'expired') return 'Session expired';
+      return 'Not signed in';
+    }
+
+    function showRun(run) {
+      status.textContent = (run && (run.error || run.message)) || 'Opening the browser.';
+      const waiting = Boolean(run && run.needsCode);
+      const channel = (run && run.channel) || '';
+      const wasHidden = form.classList.contains('hidden');
+      form.classList.toggle('hidden', !waiting);
+      closeRow.classList.toggle('hidden', waiting);
+      emailField.classList.toggle('hidden', !waiting || channel !== 'email');
+      whatsappField.classList.toggle('hidden', !waiting || channel !== 'whatsapp');
+      if (waiting && channel === 'whatsapp') emailCode.value = '';
+      if (waiting && channel === 'email') whatsappCode.value = '';
+      if (waiting && (wasHidden || channel !== asked)) {
+        const field = channel === 'whatsapp' ? whatsappCode : emailCode;
+        if (channel === 'email' || channel === 'whatsapp') field.focus();
+      }
+      if (waiting) asked = channel;
+    }
+
+    async function load() {
+      const rows = await fetch('/auth').then((response) => response.json());
+      list.replaceChildren();
+      for (const row of rows) {
+        const item = document.createElement('li');
+        const name = document.createElement('strong');
+        name.textContent = row.name;
+        const session = document.createElement('span');
+        session.className = 'session';
+        session.textContent = sessionLabel(row.session);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = 'Re-authenticate';
+        button.addEventListener('click', () => open(row));
+        item.append(name, session, button);
+        list.append(item);
+        if (row.key === current) showRun(row.run);
+      }
+    }
+
+    async function open(row) {
+      current = row.key;
+      title.textContent = 'Re-authenticate ' + row.name;
+      asked = '';
+      emailCode.value = '';
+      whatsappCode.value = '';
+      dialog.showModal();
+      const response = await fetch('/auth/' + encodeURIComponent(row.key) + '/start', { method: 'POST' });
+      showRun(await response.json());
+      clearInterval(timer);
+      timer = setInterval(load, 1000);
+    }
+
+    function close() {
+      current = '';
+      clearInterval(timer);
+      dialog.close();
+      load();
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const response = await fetch('/auth/' + encodeURIComponent(current) + '/code', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ emailCode: emailCode.value, whatsappCode: whatsappCode.value }),
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        status.textContent = body.error || 'Enter the verification code';
+        return;
+      }
+      if (asked === 'whatsapp') whatsappCode.value = '';
+      else if (asked === 'email') emailCode.value = '';
+      showRun(body.run);
+    });
+
+    document.querySelector('#auth-close').addEventListener('click', close);
+    document.querySelector('#auth-close-2').addEventListener('click', close);
+    load();
+    setInterval(load, 5000);
+  </script>
+</body>
+</html>
