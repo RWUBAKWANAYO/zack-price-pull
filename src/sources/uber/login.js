@@ -67,19 +67,32 @@ export function rejectedPrompt(channel) {
 
 let emailChoiceSent = false;
 
+async function welcomeScreen(page) {
+  const screen = await screenName(page);
+  if (screen === 'SOCIAL') return true;
+  const title = await page.locator('#title').innerText({ timeout: 500 }).catch(() => '');
+  return /welcome back/i.test(title);
+}
+
+async function securityCheck(page) {
+  return visible(page.locator('#arkose-challenge iframe, iframe[src*="arkoselabs" i]'));
+}
+
 async function chooseEmailCode(page) {
   const email = page.locator('#alt-more-options-modal-email');
-  const modal = page.locator('[data-baseweb="modal"]');
+  const more = page.locator('#alt-action-help-v2');
   if (emailChoiceSent) return false;
-  if (!(await visible(modal)) && !(await visible(email))) {
-    const more = page.locator('#alt-action-help-v2');
-    if (!(await visible(more))) return false;
-    await more.click({ timeout: 8000 });
+  if (!(await visible(email))) {
+    const welcome = await welcomeScreen(page);
+    if (!(await visible(more)) && !welcome) return false;
+    const opened = await more.waitFor({ state: 'visible', timeout: welcome ? 8000 : 1000 }).then(() => true).catch(() => false);
+    if (!opened) return false;
+    await more.click({ timeout: 8000, noWaitAfter: true }).catch(() => {});
   }
-  const ready = await email.waitFor({ state: 'visible', timeout: 20000 }).then(() => true).catch(() => false);
+  const ready = await email.waitFor({ state: 'visible', timeout: 15000 }).then(() => true).catch(() => false);
   if (!ready) return false;
   await sleep(1000);
-  await email.click({ timeout: 8000 });
+  await email.click({ timeout: 8000, noWaitAfter: true }).catch(() => {});
   const gone = await email.waitFor({ state: 'hidden', timeout: 15000 }).then(() => true).catch(() => false);
   if (!gone) return false;
   emailChoiceSent = true;
@@ -102,11 +115,22 @@ async function waitForSession(page) {
   throw new Error('Login timed out before the ride home appeared.');
 }
 
+function plainTitle(text) {
+  return String(text || '')
+    .replace(/\S+@\S+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80);
+}
+
 async function submitEmail(page, email) {
   const field = page.locator('#PHONE_NUMBER_or_EMAIL_ADDRESS');
   if (!(await visible(field))) return false;
   await field.fill(email);
-  await page.locator('#forward-button').click();
+  const forward = page.locator('#forward-button');
+  const enabled = await forward.isEnabled({ timeout: 8000 }).catch(() => false);
+  if (!enabled) return false;
+  await forward.click({ timeout: 8000, noWaitAfter: true }).catch(() => {});
   return true;
 }
 
@@ -129,6 +153,15 @@ async function codeInputs(page) {
     const mode = (await input.getAttribute('inputmode')) || '';
     const max = await input.getAttribute('maxlength');
     if (/otp|code|pin/i.test(`${id} ${name} ${auto}`) || mode === 'numeric' || max === '1') found.push(input);
+  }
+  if (found.length) return found;
+  const screen = await screenName(page);
+  if (!/otp/i.test(screen)) return found;
+  for (let index = 0; index < count; index += 1) {
+    const input = locator.nth(index);
+    const type = (await input.getAttribute('type')) || '';
+    if (type === 'hidden' || type === 'email' || type === 'password') continue;
+    found.push(input);
   }
   return found;
 }
@@ -266,6 +299,12 @@ async function finishWithCode(page, hooks) {
       return;
     }
     const ask = await readAsk(current);
+    if (!ask.inputs.length && (await welcomeScreen(current))) {
+      report('waiting', 'Uber is on the welcome screen. Opening More options.');
+      await chooseEmailCode(current);
+      await sleep(500);
+      continue;
+    }
     if (!ask.inputs.length && (await chooseEmailCode(current))) {
       report('waiting', 'Choosing email. Uber can still ask for an email code and a WhatsApp code.');
       await sleep(1000);
@@ -287,7 +326,19 @@ async function finishWithCode(page, hooks) {
       }
       continue;
     }
-    report('waiting', 'Waiting for Uber to ask for a verification code.');
+    if (await visible(current.locator('#PHONE_NUMBER_or_EMAIL_ADDRESS'))) {
+      report('waiting', 'Uber is still on the email page.');
+      await submitEmail(current, String(process.env.UBER_EMAIL || '').trim());
+      await sleep(1000);
+      continue;
+    }
+    if (await securityCheck(current)) {
+      report('waiting', 'Uber is showing a security check. It has not asked for a code.');
+      await sleep(1000);
+      continue;
+    }
+    const title = plainTitle(await current.locator('#title').innerText({ timeout: 500 }).catch(() => ''));
+    report('waiting', title ? `Uber is showing “${title}”. It has not asked for a code.` : 'Waiting for Uber to ask for a verification code.');
     await sleep(1000);
   }
   throw new Error('Login timed out before the ride home appeared.');
