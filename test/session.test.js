@@ -16,10 +16,14 @@ test('the Uber page names the code it is asking for', () => {
 });
 
 test('the browser stays on screen unless HEADLESS is true', () => {
-  assert.equal(headless({}), false);
-  assert.equal(headless({ HEADLESS: 'false' }), false);
-  assert.equal(headless({ HEADLESS: 'true' }), true);
-  assert.equal(headless({ HEADLESS: '1' }), true);
-  assert.equal(headless({ HEADLESS: 'yes' }), true);
-  assert.equal(headless({ HEADLESS: 'on' }), true);
+  const mac = { platform: 'darwin' };
+  const server = { platform: 'linux' };
+  assert.equal(headless({}, mac), false);
+  assert.equal(headless({ HEADLESS: 'false' }, mac), false);
+  assert.equal(headless({ HEADLESS: 'true' }, mac), true);
+  assert.equal(headless({ HEADLESS: '1' }, mac), true);
+  assert.equal(headless({ HEADLESS: 'yes' }, mac), true);
+  assert.equal(headless({ HEADLESS: 'on' }, mac), true);
+  assert.equal(headless({ HEADLESS: 'false' }, server), true);
+  assert.equal(headless({ DISPLAY: ':0', HEADLESS: 'false' }, server), false);
 });

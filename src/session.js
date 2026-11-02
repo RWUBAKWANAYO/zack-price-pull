@@ -9,9 +9,12 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const lockPath = path.join(root, '.browser.lock');
 dotenv.config({ path: path.join(root, '.env') });
 
-export function headless(env = process.env) {
-  const value = String(env.HEADLESS ?? 'false').trim().toLowerCase();
-  return value === 'true' || value === '1' || value === 'yes' || value === 'on';
+export function headless(env = process.env, host = process) {
+  const value = String(env.HEADLESS ?? '').trim().toLowerCase();
+  if (value === 'true' || value === '1' || value === 'yes' || value === 'on') return true;
+  const platform = host.platform || process.platform;
+  if (platform === 'linux' && !String(env.DISPLAY || '').trim()) return true;
+  return false;
 }
 
 function sleep(ms) {
